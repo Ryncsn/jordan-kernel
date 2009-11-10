@@ -2388,17 +2388,6 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state,
 
 	rq = __task_rq_lock(p);
 
-	if (rq->idle_stamp) {
-		u64 delta = rq->clock - rq->idle_stamp;
-		u64 max = 2*sysctl_sched_migration_cost;
-
-		if (delta > max)
-			rq->avg_idle = max;
-		else
-			update_avg(&rq->avg_idle, delta);
-		rq->idle_stamp = 0;
-	}
-
 	WARN_ON(p->state != TASK_WAKING);
 	cpu = task_cpu(p);
 
@@ -3236,7 +3225,6 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	unsigned long flags;
 	struct rq *rq;
 	u64 ns = 0;
-
 	rq = task_rq_lock(p, &flags);
 	ns = p->se.sum_exec_runtime + do_task_delta_exec(p, rq);
 	task_rq_unlock(rq, &flags);
