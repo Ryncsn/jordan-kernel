@@ -16,7 +16,6 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/user_namespace.h>
-#include "cred-internals.h"
 
 /*
  * userns count is 1 for root user, 1 for init_uts_ns,
@@ -141,9 +140,7 @@ struct user_struct *alloc_uid(struct user_namespace *ns, uid_t uid)
 	struct hlist_head *hashent = uidhashentry(ns, uid);
 	struct user_struct *up, *new;
 
-	/* Make uid_hash_find() + uids_user_create() + uid_hash_insert()
-	 * atomic.
-	 */
+	/* Make uid_hash_find() + uid_hash_insert() atomic. */
 	spin_lock_irq(&uidhash_lock);
 	up = uid_hash_find(uid, hashent);
 	spin_unlock_irq(&uidhash_lock);
@@ -165,11 +162,6 @@ struct user_struct *alloc_uid(struct user_namespace *ns, uid_t uid)
 		spin_lock_irq(&uidhash_lock);
 		up = uid_hash_find(uid, hashent);
 		if (up) {
-			/* This case is not possible when CONFIG_USER_SCHED
-			 * is defined, since we serialize alloc_uid() using
-			 * uids_mutex. Hence no need to call
-			 * sched_destroy_user() or remove_user_sysfs_dir().
-			 */
 			key_put(new->uid_keyring);
 			key_put(new->session_keyring);
 			kmem_cache_free(uid_cachep, new);
