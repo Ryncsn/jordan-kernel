@@ -40,7 +40,7 @@ static void spidev_release(struct device *dev)
 		spi->master->cleanup(spi);
 
 	spi_master_put(spi->master);
-	kfree(dev);
+	kfree(spi);
 }
 
 static ssize_t
