@@ -2248,9 +2248,7 @@ mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent, bool swapout)
 
 	/* record memcg information */
 	if (do_swap_account && swapout && memcg) {
-		rcu_read_lock();
 		swap_cgroup_record(ent, css_id(&memcg->css));
-		rcu_read_unlock();
 		mem_cgroup_get(memcg);
 	}
 	if (swapout && memcg)
@@ -2306,10 +2304,8 @@ static int mem_cgroup_move_swap_account(swp_entry_t entry,
 {
 	unsigned short old_id, new_id;
 
-	rcu_read_lock();
 	old_id = css_id(&from->css);
 	new_id = css_id(&to->css);
-	rcu_read_unlock();
 
 	if (swap_cgroup_cmpxchg(entry, old_id, new_id) == old_id) {
 		if (!mem_cgroup_is_root(from))
@@ -3725,16 +3721,11 @@ static int is_target_pte_for_mc(struct vm_area_struct *vma,
 			put_page(page);
 	}
 	/* throught */
-	if (ent.val && do_swap_account && !ret) {
-		unsigned short id;
-		rcu_read_lock();
-		id = css_id(&mc.from->css);
-		rcu_read_unlock();
-		if (id == lookup_swap_cgroup(ent)) {
-			ret = MC_TARGET_SWAP;
-			if (target)
-				target->ent = ent;
-		}
+	if (ent.val && do_swap_account && !ret &&
+			css_id(&mc.from->css) == lookup_swap_cgroup(ent)) {
+		ret = MC_TARGET_SWAP;
+		if (target)
+			target->ent = ent;
 	}
 	return ret;
 }
