@@ -226,7 +226,9 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card, spinlock_t *lock
 
 	init_MUTEX(&mq->thread_sem);
 
-	mq->thread = kthread_run(mmc_queue_thread, mq, "mmcqd");
+	mq->thread = kthread_run(mmc_queue_thread, mq, "mmcqd/%d",
+		host->index);
+
 	if (IS_ERR(mq->thread)) {
 		ret = PTR_ERR(mq->thread);
 		goto free_bounce_sg;
