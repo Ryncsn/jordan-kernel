@@ -488,13 +488,13 @@ static void ipc_events(void)
 			pending_events &= ~IPC_PM_SUSPEND;
 			DEBUG("%s @ jiffies=%lu\n", __func__, jiffies);
 			usb_ipc_data_param.allow_suspend = 1;
-#ifdef CONFIG_HAS_WAKELOCK
-			wake_unlock(&usb_ipc_wakelock);
-#endif
 			LOG_IPC_ACTIVITY(aIpcW, iIpcW, jiffies);
 			usb_autopm_put_interface(
 				usb_ifnum_to_if(usb_ipc_data_param.udev,
 						IPC_DATA_CH_NUM));
+#ifdef CONFIG_HAS_WAKELOCK
+			wake_unlock(&usb_ipc_wakelock);
+#endif
 		}
 		if (pending_events & IPC_PM_RESUME) {
 			pending_events &= ~IPC_PM_RESUME;
@@ -596,7 +596,15 @@ int usb_ipc_data_probe(struct usb_interface *intf,
 	 */
 	ipc_api_usb_probe(IPC_DATA_CH_NUM, &usb_ipc_data_param);
 
+	usb_ipc_data_param.ipc_events = 0;
+	kipcd_task = kthread_run(ipc_thread, NULL, "kipcd");
+
 #ifdef CONFIG_PM
+
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock(&usb_ipc_wakelock);
+#endif
+
 	spin_lock_init(&usb_ipc_data_param.pm_lock);
 	INIT_DELAYED_WORK(&usb_ipc_data_param.suspend_work, ipc_suspend_work);
 
@@ -607,11 +615,18 @@ int usb_ipc_data_probe(struct usb_interface *intf,
 	usb_ipc_data_param.working = 0;
 	usb_ipc_data_param.write_urb_used = 0;
 	usb_ipc_data_param.read_urb_used = 0;
+	usb_ipc_data_param.allow_suspend = 0;
 	usb_autopm_set_interface(usb_ifnum_to_if(usb_ipc_data_param.udev,
 						 IPC_DATA_CH_NUM));
+	queue_delayed_work(usb_ipc_data_param.
+		ksuspend_usb_wq,
+		&usb_ipc_data_param.
+		suspend_work,
+		msecs_to_jiffies(
+		    USB_IPC_SUSPEND_DELAY)
+		);
+
 #endif
-	usb_ipc_data_param.ipc_events = 0;
-	kipcd_task = kthread_run(ipc_thread, NULL, "kipcd");
 
 	return 0;
 }
@@ -630,11 +645,15 @@ void usb_ipc_data_disconnect(struct usb_interface *intf)
 
 	DEBUG("Enter %s\n", __func__);
 	/* unlink URBs */
-	kthread_stop(kipcd_task);
 #ifdef CONFIG_PM
+	usb_ipc_data_param.ipc_events = 0;
+	flush_workqueue(usb_ipc_data_param.ksuspend_usb_wq);
 	cancel_delayed_work_sync(&usb_ipc_data_param.suspend_work);
 	destroy_workqueue(usb_ipc_data_param.ksuspend_usb_wq);
+
 #endif
+
+	kthread_stop(kipcd_task);
 
 	usb_unlink_urb(&usb_ipc_data_param.read_urb);
 	usb_unlink_urb(&usb_ipc_data_param.write_urb);
@@ -774,7 +793,7 @@ static int usb_ipc_suspend(struct usb_interface *iface,
 	if (usb_ipc_data_param.working == 1) {
 		spin_unlock_bh(&usb_ipc_data_param.pm_lock);
 		DEBUG("%s:working, can not suspend\n", __func__);
-		return -1;
+		return -EBUSY;
 	}
 	if (iface->cur_altsetting->desc.bInterfaceNumber ==
 	    USB_IPC_DATA_IF_NUM) {
@@ -802,10 +821,10 @@ static int usb_ipc_resume(struct usb_interface *iface)
 	DEBUG("%s:sleeping=%d working=%d\n", __func__,
 	      usb_ipc_data_param.sleeping, usb_ipc_data_param.working);
 	spin_lock_bh(&usb_ipc_data_param.pm_lock);
-	usb_ipc_data_param.allow_suspend = 0;
 #ifdef CONFIG_HAS_WAKELOCK
 	wake_lock(&usb_ipc_wakelock);
 #endif
+	usb_ipc_data_param.allow_suspend = 0;
 	if (iface->cur_altsetting->desc.bInterfaceNumber
 	    == USB_IPC_DATA_IF_NUM) {
 		LOG_IPC_ACTIVITY(aIpcR, iIpcR, jiffies);
