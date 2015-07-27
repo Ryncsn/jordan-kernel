@@ -596,11 +596,7 @@ int usb_ipc_data_probe(struct usb_interface *intf,
 	 */
 	ipc_api_usb_probe(IPC_DATA_CH_NUM, &usb_ipc_data_param);
 
-	usb_ipc_data_param.ipc_events = 0;
-	kipcd_task = kthread_run(ipc_thread, NULL, "kipcd");
-
 #ifdef CONFIG_PM
-
 #ifdef CONFIG_HAS_WAKELOCK
 	wake_lock(&usb_ipc_wakelock);
 #endif
@@ -615,9 +611,15 @@ int usb_ipc_data_probe(struct usb_interface *intf,
 	usb_ipc_data_param.working = 0;
 	usb_ipc_data_param.write_urb_used = 0;
 	usb_ipc_data_param.read_urb_used = 0;
-	usb_ipc_data_param.allow_suspend = 0;
 	usb_autopm_set_interface(usb_ifnum_to_if(usb_ipc_data_param.udev,
 						 IPC_DATA_CH_NUM));
+	usb_ipc_data_param.ipc_events = 0;
+#endif
+	kipcd_task = kthread_run(ipc_thread, NULL, "kipcd");
+
+#ifdef CONFIG_PM
+    cancel_delayed_work_sync(
+            &usb_ipc_data_param.suspend_work);
 	queue_delayed_work(usb_ipc_data_param.
 		ksuspend_usb_wq,
 		&usb_ipc_data_param.
@@ -647,8 +649,6 @@ void usb_ipc_data_disconnect(struct usb_interface *intf)
 	/* unlink URBs */
 #ifdef CONFIG_PM
 	usb_ipc_data_param.ipc_events = 0;
-	flush_workqueue(usb_ipc_data_param.ksuspend_usb_wq);
-	cancel_delayed_work_sync(&usb_ipc_data_param.suspend_work);
 	destroy_workqueue(usb_ipc_data_param.ksuspend_usb_wq);
 
 #endif
