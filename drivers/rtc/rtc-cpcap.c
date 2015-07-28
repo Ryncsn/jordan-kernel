@@ -25,6 +25,7 @@
 #include <linux/spi/cpcap.h>
 #ifdef CONFIG_RTC_INTF_SECCLKD
 #include <linux/miscdevice.h>
+#include <linux/sched.h>
 
 #define CNT_MASK  0xFFFF
 #endif

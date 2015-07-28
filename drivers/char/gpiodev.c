@@ -38,6 +38,7 @@
 #include <linux/autoconf.h>
 #include <linux/gpiodev.h>
 #include <linux/platform_device.h>
+#include <linux/sched.h>
 
 MODULE_AUTHOR("Motorola, Inc.");
 MODULE_DESCRIPTION("GPIO device for user space accessing GPIO pins");

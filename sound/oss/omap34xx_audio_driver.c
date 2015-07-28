@@ -27,6 +27,7 @@
 #include <linux/sound.h>
 #include <linux/poll.h>
 #include <linux/cpcap_audio_platform_data.h>
+#include <linux/sched.h>
 
 #ifdef CONFIG_WAKELOCK
 #include <linux/wakelock.h>

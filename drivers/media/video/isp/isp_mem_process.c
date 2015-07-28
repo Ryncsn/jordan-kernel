@@ -22,6 +22,7 @@
 #include <asm/page.h>
 #include <linux/pagemap.h>
 #include <linux/delay.h>
+#include <linux/sched.h>
 
 #include "isp.h"
 #include "ispreg.h"

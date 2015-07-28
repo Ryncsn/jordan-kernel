@@ -21,6 +21,7 @@
 #include <linux/delay.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <linux/sched.h>
 
 #include "hp3a_common.h"
 #include "hp3a_queue.h"

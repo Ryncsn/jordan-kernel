@@ -41,6 +41,7 @@
 #include <linux/videodev2.h>
 #include <linux/version.h>
 #include <linux/platform_device.h>
+#include <linux/sched.h>
 
 #include <media/v4l2-common.h>
 #include <media/v4l2-ioctl.h>

@@ -20,6 +20,7 @@
 
 #include <linux/interrupt.h>
 #include <linux/device.h>
+#include <linux/sched.h>
 
 #include "hp3a.h"
 #include "hp3a_common.h"
