@@ -45,7 +45,7 @@ struct cpcap_key_data {
 #ifdef VERY_LONG_HOLD_REBOOT
 static enum hrtimer_restart very_longPress_timer_callback(struct hrtimer *timer)
 {
-	arch_reset(0, 0);
+    panic("Force reboot!");
 
 	while (1)
 		printk(KERN_ERR "power key pressed IRQ HANDLER (SHUTTING DOWN - forcing reboot)\n");
