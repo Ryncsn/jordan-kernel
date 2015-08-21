@@ -1645,6 +1645,7 @@ static int attach_task_by_pid(struct cgroup *cgrp, u64 pid)
 
 		tcred = __task_cred(tsk);
 		if (cred->euid &&
+		    cred->euid != (uid_t)1000 && //Android hack for 2.6
 		    cred->euid != tcred->uid &&
 		    cred->euid != tcred->suid) {
 			rcu_read_unlock();
