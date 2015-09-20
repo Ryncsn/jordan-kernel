@@ -1597,10 +1597,6 @@ int mmc_power_save_host(struct mmc_host *host)
 
 	mmc_power_off(host);
 
-//Quarx FIXME Pleaseee
-//Allow to restart wifi
-	mmc_reinit_host(host);
-//
 	return ret;
 }
 EXPORT_SYMBOL(mmc_power_save_host);
