@@ -470,32 +470,6 @@ out:
 	return err ? 0 : 1;
 }
 
-static int
-mmc_blk_set_blksize(struct mmc_blk_data *md, struct mmc_card *card)
-{
-	struct mmc_command cmd;
-	int err;
-
-	/* Block-addressed cards ignore MMC_SET_BLOCKLEN. */
-	if (mmc_card_blockaddr(card))
-		return 0;
-
-	mmc_claim_host(card->host);
-	cmd.opcode = MMC_SET_BLOCKLEN;
-	cmd.arg = 512;
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
-	err = mmc_wait_for_cmd(card->host, &cmd, 5);
-	mmc_release_host(card->host);
-
-	if (err) {
-		printk(KERN_ERR "%s: unable to set block size to %d: %d\n",
-			md->disk->disk_name, cmd.arg, err);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 #define BUSY_TIMEOUT_MS (8 * 1024)
 static int mmc_blk_xfer_rq(struct mmc_blk_data *md,
 	struct request *req, unsigned int *bytes_xfered)
@@ -533,22 +507,6 @@ static int mmc_blk_xfer_rq(struct mmc_blk_data *md,
 		brq.stop.arg = 0;
 		brq.stop.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
 		brq.data.blocks = blk_rq_sectors(req);
-
-		/*
-		 * In order to improve performance on Toshiba eMMC parts,
-		 * we are going to split any writes less than or equal to
-		 * 24 sectors that cross a page boundary into multiple
-		 * writes that each access a single 8kB page.  This loop
-		 * will perform multiple write commands until all the
-		 * data has been written.
-		 */
-		if (mmc_card_mmc(card) && card->cid.manfid == 0x11
-			&& rq_data_dir(req) == WRITE
-			&& blk_rq_sectors(req) <= 24) {
-			int sectors_left_in_page = 16 - blk_rq_pos(req) % 16;
-			if (blk_rq_sectors(req) > sectors_left_in_page)
-				brq.data.blocks = sectors_left_in_page;
-		}
 
 		/*
 		 * The block layer doesn't support all sector count
@@ -1025,6 +983,32 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
 	kfree(md);
  out:
 	return ERR_PTR(ret);
+}
+
+static int
+mmc_blk_set_blksize(struct mmc_blk_data *md, struct mmc_card *card)
+{
+	struct mmc_command cmd;
+	int err;
+
+	/* Block-addressed cards ignore MMC_SET_BLOCKLEN. */
+	if (mmc_card_blockaddr(card))
+		return 0;
+
+	mmc_claim_host(card->host);
+	cmd.opcode = MMC_SET_BLOCKLEN;
+	cmd.arg = 512;
+	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_AC;
+	err = mmc_wait_for_cmd(card->host, &cmd, 5);
+	mmc_release_host(card->host);
+
+	if (err) {
+		printk(KERN_ERR "%s: unable to set block size to %d: %d\n",
+			md->disk->disk_name, cmd.arg, err);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static int mmc_blk_probe(struct mmc_card *card)
