@@ -61,7 +61,6 @@ struct mmc_blk_data {
 	spinlock_t	lock;
 	struct gendisk	*disk;
 	struct mmc_queue queue;
-	char            *bounce;
 
 	unsigned int	usage;
 	unsigned int	read_only;
@@ -287,9 +286,6 @@ static void mmc_blk_put(struct mmc_blk_data *md)
 		blk_cleanup_queue(md->queue.queue);
 
 		__clear_bit(devidx, dev_use);
-
-		if (md->bounce)
-			kfree(md->bounce);
 
 		put_disk(md->disk);
 		kfree(md);
@@ -978,8 +974,6 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
  err_putdisk:
 	put_disk(md->disk);
  err_kfree:
-	if (md->bounce)
-		kfree(md->bounce);
 	kfree(md);
  out:
 	return ERR_PTR(ret);
