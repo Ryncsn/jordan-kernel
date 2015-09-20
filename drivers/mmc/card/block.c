@@ -496,157 +496,6 @@ mmc_blk_set_blksize(struct mmc_blk_data *md, struct mmc_card *card)
 	return 0;
 }
 
-/*
- * Workaround for Toshiba eMMC performance.  If the request is less than two
- * flash pages in size, then we want to split the write into one or two
- * page-aligned writes to take advantage of faster buffering.  Here we can
- * adjust the size of the MMC request and let the block layer request handler
- * deal with generating another MMC request.
- */
-#define TOSHIBA_MANFID 0x11
-#define TOSHIBA_PAGE_SIZE 16		/* sectors */
-#define TOSHIBA_ADJUST_THRESHOLD 24	/* sectors */
-static bool mmc_adjust_toshiba_write(struct mmc_card *card,
-					     struct mmc_request *mrq)
-{
-	if (mmc_card_mmc(card) && card->cid.manfid == TOSHIBA_MANFID &&
-	    mrq->data->blocks <= TOSHIBA_ADJUST_THRESHOLD) {
-		int sectors_in_page = TOSHIBA_PAGE_SIZE -
-				      (mrq->cmd->arg % TOSHIBA_PAGE_SIZE);
-		if (mrq->data->blocks > sectors_in_page) {
-			mrq->data->blocks = sectors_in_page;
-			return true;
-		}
-	}
-
-	return false;
-}
-
-/*
- * This is another strange workaround to try to close the gap on Toshiba eMMC
- * performance when compared to other vendors.  In order to take advantage
- * of certain optimizations and assumptions in those cards, we will look for
- * multiblock write transfers below a certain size and we do the following:
- *
- * - Break them up into seperate page-aligned (8k flash pages) transfers.
- * - Execute the transfers in reverse order.
- * - Use "reliable write" transfer mode.
- *
- * Neither the block I/O layer nor the scatterlist design seem to lend them-
- * selves well to executing a block request out of order.  So instead we let
- * mmc_blk_issue_rq() setup the MMC request for the entire transfer and then
- * break it up and reorder it here.  This also requires that we put the data
- * into a bounce buffer and send it as individual sg's.
- */
-#define TOSHIBA_LOW_THRESHOLD 48	/* sectors */
-#define TOSHIBA_HIGH_THRESHOLD 64	/* sectors */
-static bool mmc_handle_toshiba_write(struct mmc_queue *mq,
-                                     struct mmc_card *card,
-                                     struct mmc_request *mrq)
-{
-	struct mmc_blk_data *md = mq->data;
-	unsigned int first_page, last_page, page;
-	unsigned long flags;
-
-	if (!md->bounce ||
-	    mrq->data->blocks > TOSHIBA_HIGH_THRESHOLD ||
-	    mrq->data->blocks < TOSHIBA_LOW_THRESHOLD)
-		return false;
-
-	first_page = mrq->cmd->arg / TOSHIBA_PAGE_SIZE;
-	last_page = (mrq->cmd->arg + mrq->data->blocks - 1) / TOSHIBA_PAGE_SIZE;
-
-	/* Single page write: just do it the normal way */
-	if (first_page == last_page)
-		return false;
-
-	local_irq_save(flags);
-	sg_copy_to_buffer(mrq->data->sg, mrq->data->sg_len,
-	                  md->bounce, mrq->data->blocks * 512);
-	local_irq_restore(flags);
-
-	for (page = last_page; page >= first_page; page--) {
-		unsigned long offset, length;
-		struct mmc_blk_request brq;
-		struct mmc_command cmd;
-		struct scatterlist sg;
-
-		memset(&brq, 0, sizeof(struct mmc_blk_request));
-		brq.mrq.cmd = &brq.cmd;
-		brq.mrq.data = &brq.data;
-
-		brq.cmd.arg = page * TOSHIBA_PAGE_SIZE;
-		brq.data.blksz = 512;
-		if (page == first_page) {
-			brq.cmd.arg = mrq->cmd->arg;
-			brq.data.blocks = TOSHIBA_PAGE_SIZE -
-			                  (mrq->cmd->arg % TOSHIBA_PAGE_SIZE);
-		} else if (page == last_page)
-			brq.data.blocks = (mrq->cmd->arg + mrq->data->blocks) %
-			                  TOSHIBA_PAGE_SIZE;
-		if (brq.data.blocks == 0)
-			brq.data.blocks = TOSHIBA_PAGE_SIZE;
-
-		if (!mmc_card_blockaddr(card))
-			brq.cmd.arg <<= 9;
-		brq.cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
-		brq.stop.opcode = MMC_STOP_TRANSMISSION;
-		brq.stop.arg = 0;
-		brq.stop.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
-
-		brq.data.flags |= MMC_DATA_WRITE;
-		if (brq.data.blocks > 1) {
-			if (!mmc_host_is_spi(card->host))
-				brq.mrq.stop = &brq.stop;
-			brq.cmd.opcode = MMC_WRITE_MULTIPLE_BLOCK;
-		} else {
-			brq.mrq.stop = NULL;
-			brq.cmd.opcode = MMC_WRITE_BLOCK;
-		}
-
-		if (brq.cmd.opcode == MMC_WRITE_MULTIPLE_BLOCK &&
-		    brq.data.blocks <= card->ext_csd.rel_wr_sec_c) {
-			int err;
-
-			cmd.opcode = MMC_SET_BLOCK_COUNT;
-			cmd.arg = brq.data.blocks | (1 << 31);
-			cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
-			err = mmc_wait_for_cmd(card->host, &cmd, 0);
-			if (!err)
-				brq.mrq.stop = NULL;
-		}
-
-		mmc_set_data_timeout(&brq.data, card);
-
-		offset = (brq.cmd.arg - mrq->cmd->arg) * 512;
-		length = brq.data.blocks * 512;
-		sg_init_one(&sg, md->bounce + offset, length);
-		brq.data.sg = &sg;
-		brq.data.sg_len = 1;
-
-		mmc_wait_for_req(card->host, &brq.mrq);
-
-		mrq->data->bytes_xfered += brq.data.bytes_xfered;
-
-		if (brq.cmd.error || brq.data.error || brq.stop.error) {
-			mrq->cmd->error = brq.cmd.error;
-			mrq->data->error = brq.data.error;
-			mrq->stop->error = brq.stop.error;
-
-			/*
-			 * We're executing the request backwards, so don't let
-			 * the block layer think some part of it has succeeded.
-			 * It will get it wrong.  Since the failure will cause
-			 * us to fall back on single block writes, we're better
-			 * off reporting that none of the data was written.
-			 */
-			mrq->data->bytes_xfered = 0;
-			break;
-		}
-	}
-
-	return true;
-}
 #define BUSY_TIMEOUT_MS (8 * 1024)
 static int mmc_blk_xfer_rq(struct mmc_blk_data *md,
 	struct request *req, unsigned int *bytes_xfered)
@@ -740,9 +589,6 @@ static int mmc_blk_xfer_rq(struct mmc_blk_data *md,
 			brq.data.flags |= MMC_DATA_WRITE;
 		}
 
-		if (rq_data_dir(req) == WRITE)
-			mmc_adjust_toshiba_write(card, &brq.mrq);
-
 		mmc_set_data_timeout(&brq.data, card);
 
 		brq.data.sg = md->queue.sg;
@@ -768,12 +614,7 @@ static int mmc_blk_xfer_rq(struct mmc_blk_data *md,
 
 		mmc_queue_bounce_pre(&md->queue);
 
-		/*
-		 * Try the workaround first for writes, then fall back.
-		 */
-		if (rq_data_dir(req) != WRITE || disable_multi ||
-		    !mmc_handle_toshiba_write(&md->queue, card, &brq.mrq))
-			mmc_wait_for_req(card->host, &brq.mrq);
+		mmc_wait_for_req(card->host, &brq.mrq);
 
 		mmc_queue_bounce_post(&md->queue);
 
@@ -1113,16 +954,6 @@ static struct mmc_blk_data *mmc_blk_alloc(struct mmc_card *card)
 	if (!md) {
 		ret = -ENOMEM;
 		goto out;
-	}
-
-	if (card->cid.manfid == TOSHIBA_MANFID && mmc_card_mmc(card)) {
-		pr_info("%s: enable Toshiba workaround\n",
-			mmc_hostname(card->host));
-		md->bounce = kmalloc(TOSHIBA_HIGH_THRESHOLD * 512, GFP_KERNEL);
-		if (!md->bounce) {
-			ret = -ENOMEM;
-			goto err_kfree;
-		}
 	}
 
 	/*
