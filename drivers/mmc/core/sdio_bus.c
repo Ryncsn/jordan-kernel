@@ -142,6 +142,10 @@ static int sdio_bus_probe(struct device *dev)
 			goto out;
 	}
 
+	if (func->card->host->ios.power_mode == MMC_POWER_OFF) {
+		mmc_reinit_host(func->card->host);
+	}
+
 	/* Set the default block size so the driver is sure it's something
 	 * sensible. */
 	sdio_claim_host(func);
