@@ -68,7 +68,6 @@
 
 #define VS18			(1 << 26)
 #define VS30			(1 << 25)
-#define VS33			(1 << 24)
 #define SDVS18			(0x5 << 9)
 #define SDVS30			(0x6 << 9)
 #define SDVS33			(0x7 << 9)
@@ -355,8 +354,8 @@ static int omap_hsmmc_context_restore(struct omap_hsmmc_host *host)
 		    (1 << ios->vdd) <= MMC_VDD_23_24)
 			hctl = SDVS18;
 		else
-			hctl = SDVS33;
-		capa = VS33 | VS30 | VS18;
+			hctl = SDVS30;
+		capa = VS30 | VS18;
 	} else {
 		hctl = SDVS18;
 		capa = VS18;
@@ -870,7 +869,7 @@ static int omap_hsmmc_switch_opcond(struct omap_hsmmc_host *host, int vdd)
 	if ((1 << vdd) <= MMC_VDD_23_24)
 		reg_val |= SDVS18;
 	else
-		reg_val |= SDVS33;
+		reg_val |= SDVS30;
 
 	OMAP_HSMMC_WRITE(host->base, HCTL, reg_val);
 	set_sd_bus_power(host);
@@ -1310,8 +1309,8 @@ static void omap_hsmmc_conf_bus_power(struct omap_hsmmc_host *host)
 
 	/* Only MMC1 supports 3.0V */
 	if (host->id == OMAP_MMC1_DEVID) {
-		hctl = SDVS33;
-		capa = VS33 | VS30 | VS18;
+		hctl = SDVS30;
+		capa = VS30 | VS18;
 	} else {
 		hctl = SDVS18;
 		capa = VS18;
