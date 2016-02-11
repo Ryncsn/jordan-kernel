@@ -1084,14 +1084,40 @@ static int omap_hsmmc_start_dma_transfer(struct omap_hsmmc_host *host,
 	return 0;
 }
 
-static void set_data_timeout(struct omap_hsmmc_host *host)
+static void set_data_timeout(struct omap_hsmmc_host *host,
+			     unsigned int timeout_ns,
+			     unsigned int timeout_clks)
 {
-	uint32_t reg;
+	unsigned int timeout, cycle_ns;
+	uint32_t reg, clkd, dto = 0;
 
 	reg = OMAP_HSMMC_READ(host->base, SYSCTL);
+	clkd = (reg & CLKD_MASK) >> CLKD_SHIFT;
+	if (clkd == 0)
+		clkd = 1;
+
+	cycle_ns = 1000000000 / (clk_get_rate(host->fclk) / clkd);
+	timeout = timeout_ns / cycle_ns;
+	timeout += timeout_clks;
+	if (timeout) {
+		while ((timeout & 0x80000000) == 0) {
+			dto += 1;
+			timeout <<= 1;
+		}
+		dto = 31 - dto;
+		timeout <<= 1;
+		if (timeout && dto)
+			dto += 1;
+		if (dto >= 13)
+			dto -= 13;
+		else
+			dto = 0;
+		if (dto > 14)
+			dto = 14;
+	}
 
 	reg &= ~DTO_MASK;
-	reg |= DTO << DTO_SHIFT;
+	reg |= dto << DTO_SHIFT;
 	OMAP_HSMMC_WRITE(host->base, SYSCTL, reg);
 }
 
@@ -1111,14 +1137,17 @@ omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req)
 		 * busy signal.
 		 */
 		if (req->cmd->flags & MMC_RSP_BUSY) {
-			set_data_timeout(host);
+			if (req->cmd->opcode == MMC_ERASE)
+				set_data_timeout(host, 2000000000U, 0);
+			else
+				set_data_timeout(host, 100000000U, 0);
 		}
 		return 0;
 	}
 
 	OMAP_HSMMC_WRITE(host->base, BLK, (req->data->blksz)
 					| (req->data->blocks << 16));
-	set_data_timeout(host);
+	set_data_timeout(host, req->data->timeout_ns, req->data->timeout_clks);
 
 	if (host->use_dma) {
 		ret = omap_hsmmc_start_dma_transfer(host, req);
